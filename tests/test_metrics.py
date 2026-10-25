@@ -156,3 +156,38 @@ def test_random_split_more_optimistic_than_grouped_on_synthetic():
         prauc_gap.append(rnd["hurdle"]["pr_auc"] - g["hurdle"]["pr_auc"])
     assert np.mean(dev_gap) > 0   # grouped regime has higher count log-loss
     assert np.mean(prauc_gap) > 0  # random regime ranks sellers better
+
+
+def test_category_macro_metrics_handles_nullable_categories():
+    """Missing category IDs should be evaluated as one explicit category."""
+    import pandas as pd
+
+    y = np.array([0, 1, 0, 2, 1, 0], dtype=float)
+    pred = np.array([0, 0, 1, 1, 1, 0], dtype=float)
+    categories = pd.Series(pd.array(["a", "a", None, None, "b", "b"], dtype="string"))
+
+    result = ev.category_macro_metrics(y, pred, categories, min_n=2)
+
+    # Three groups (a, b, and missing), each with two rows.
+    assert result["n_categories"] == 3
+    assert result["macro_mae"] == pytest.approx(0.5)
+
+
+def test_data_fingerprint_is_stable_and_sensitive_to_values():
+    import pandas as pd
+
+    from basalam.run import _data_fingerprint
+
+    frame = pd.DataFrame(
+        {
+            "sales_count_week": pd.Series([0, 1, None, 3], dtype="Float64"),
+            "vendor_id": pd.Series(["v1", "v2", None, "v1"], dtype="string"),
+        }
+    )
+    same_values = frame.copy()
+    changed_values = frame.copy()
+    changed_values.loc[1, "sales_count_week"] = 2
+
+    first = _data_fingerprint(frame)
+    assert first == _data_fingerprint(same_values)
+    assert first != _data_fingerprint(changed_values)

@@ -19,9 +19,11 @@ make prepare-data     # OPTIONAL: download pinned archive (434MB), verify SHA-25
 make audit-real       # full-data audit + grouped experiment (needs prepare-data)
 ```
 
-A GitHub Actions workflow is supplied (`.github/workflows/ci.yml`) that runs the
-tests and the smoke pipeline on every push. It has been executed locally
-(pytest + smoke); it has not yet run on GitHub Actions.
+A GitHub Actions workflow is supplied (`.github/workflows/ci.yml`) to run
+the tests and smoke pipeline on pushes and pull requests. Check the
+[Actions page](https://github.com/sinanaghdi/basalam-sales-estimation/actions)
+for the current run status; workflow status is time-dependent and should not be
+inferred from this README.
 
 ## What this repository guarantees
 
@@ -75,7 +77,19 @@ but the data originates from BaSalam's public API; BaSalam's terms of use may
 restrict republication. This repository publishes code and derived statistics
 only. The LICENSE covers code.
 
-## Status
+## Current status
 
-Phase 0 (bootstrap + smoke pipeline) is implemented and tested. See
-`PROJECT_PLAN.md` for the full phase plan, milestones, and acceptance criteria.
+The repository contains the data-audit gate, leakage-aware feature pipeline,
+grouped and random evaluation regimes, baselines, count and rare-positive
+metrics, vendor-cluster bootstrap intervals, synthetic smoke data, and CI
+tests. The full research plan still includes additional work such as paired
+bootstrap comparisons, multi-seed robustness analysis, feature ablations,
+SHAP analysis, and completion of the model card. These are not complete merely
+because the smoke pipeline passes.
+
+Before presenting real-data results as research findings, run the pinned
+real-data audit and document the exact configuration, commit, data fingerprint,
+and limitations. The reference week is undocumented, so the target must not be
+described as future-sales forecasting.
+
+See `PROJECT_PLAN.md` for milestones, hypotheses, and acceptance criteria.

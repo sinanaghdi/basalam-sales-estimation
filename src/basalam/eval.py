@@ -93,7 +93,15 @@ def stratified_metrics(y, pred) -> dict:
 def category_macro_metrics(y, pred, categories, min_n: int = 30) -> dict:
     y = np.asarray(y)
     pred = np.asarray(pred)
-    cats = np.asarray(categories)
+    # Normalize nullable category values before numpy comparisons: pd.NA
+    # comparisons can produce object arrays with ambiguous truth values.
+    cats = (
+        pd.Series(categories)
+        .astype("string")
+        .fillna("<missing>")
+        .astype(str)
+        .to_numpy()
+    )
     per_cat = []
     for c in np.unique(cats):
         mask = cats == c
