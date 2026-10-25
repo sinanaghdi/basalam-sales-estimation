@@ -126,11 +126,22 @@ def vendor_cluster_bootstrap_ci(
     stat_fn = stat_fn or mae
     y = np.asarray(y)
     pred = np.asarray(pred)
-    # pandas `string` dtype NA survives .astype(str) (conversion is a no-op)
-    # and factorize would emit -1 codes — fill first, then stringify.
-    codes, _ = pd.factorize(pd.Series(vendors).fillna("<missing>").astype(str))
+    vendors = pd.Series(vendors)
+    if y.ndim != 1 or pred.ndim != 1:
+        raise ValueError("y and pred must be one-dimensional arrays")
+    if len(y) == 0:
+        raise ValueError("bootstrap inputs must contain at least one row")
+    if len(y) != len(pred) or len(y) != len(vendors):
+        raise ValueError("y, pred, and vendors must have equal lengths")
+    if not isinstance(n_boot, (int, np.integer)) or isinstance(n_boot, (bool, np.bool_)) or n_boot < 1:
+        raise ValueError("n_boot must be a positive integer")
+    if agg != "mean":
+        raise ValueError("only agg='mean' is supported")
+    # Preserve missing IDs as their own factorized level without stringifying
+    # them into a sentinel that could collide with a real vendor ID.
+    codes, unique_vendors = pd.factorize(vendors, sort=False, use_na_sentinel=False)
     rng = np.random.default_rng(seed)
-    n_v = codes.max() + 1
+    n_v = len(unique_vendors)
     if stat_fn is mae:
         abs_err = np.abs(y - pred)
         sums = np.bincount(codes, weights=abs_err, minlength=n_v)
