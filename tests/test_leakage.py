@@ -143,3 +143,23 @@ def test_check_audit_uses_pinned_keys():
     problems = data_mod.check_audit(bad)
     assert any("rows" in p for p in problems)
     assert any("score_leak" in p for p in problems)
+
+def test_group_kfold_does_not_merge_missing_id_with_literal_sentinel():
+    """A real '<missing>' ID and a null ID are separate groups."""
+    df = pd.DataFrame(
+        {"vendor_id": ["a", "b", "c", "<missing>", None], "x": range(5)}
+    )
+    folds = sp.group_kfold(df, "vendor_id", n_splits=5, seed=0)
+    row_to_fold = {}
+    for fold_index, (_, test_idx) in enumerate(folds):
+        for row_index in test_idx:
+            row_to_fold[int(row_index)] = fold_index
+    assert len(set(row_to_fold.values())) == 5
+    assert row_to_fold[3] != row_to_fold[4]
+
+
+def test_group_kfold_rejects_more_folds_than_groups():
+    df = pd.DataFrame({"vendor_id": ["a", "a", "b"], "x": range(3)})
+    with pytest.raises(ValueError, match="cannot exceed"):
+        sp.group_kfold(df, "vendor_id", n_splits=3)
+
