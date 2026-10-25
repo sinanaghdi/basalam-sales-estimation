@@ -226,7 +226,12 @@ def _data_fingerprint(df: pd.DataFrame) -> str:
     intentionally significant because this pins the exact experiment input.
     """
     missing_token = "<missing>"
-    target = pd.to_numeric(df[TARGET], errors="coerce").astype("float64")
+    target = pd.Series(
+        pd.to_numeric(df[TARGET], errors="coerce").to_numpy(
+            dtype="float64", na_value=np.nan
+        ),
+        index=df.index,
+    )
     groups = df[GROUP].astype("string").fillna(missing_token)
 
     h = hashlib.sha256()
