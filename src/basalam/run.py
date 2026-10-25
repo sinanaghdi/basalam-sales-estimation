@@ -219,12 +219,20 @@ def run_experiment(cfg: dict) -> dict:
 
 
 def _data_fingerprint(df: pd.DataFrame) -> str:
-    """Cheap content hash of the target + group columns (pins the data in the
-    results without hashing the whole frame)."""
+    """Return a stable fingerprint of target and group values.
+
+    Hash canonical pandas value hashes rather than raw object-array memory:
+    object-array bytes can encode process-specific pointer values. Row order is
+    intentionally significant because this pins the exact experiment input.
+    """
+    missing_token = "<missing>"
+    target = pd.to_numeric(df[TARGET], errors="coerce").astype("float64")
+    groups = df[GROUP].astype("string").fillna(missing_token)
+
     h = hashlib.sha256()
-    h.update(df[TARGET].to_numpy().tobytes())
-    h.update(pd.factorize(df[GROUP].fillna("<missing>").astype(str))[0].tobytes())
-    h.update(str(len(df)).encode())
+    h.update(pd.util.hash_pandas_object(target, index=False).to_numpy(dtype="<u8").tobytes())
+    h.update(pd.util.hash_pandas_object(groups, index=False).to_numpy(dtype="<u8").tobytes())
+    h.update(str(len(df)).encode("ascii"))
     return h.hexdigest()[:16]
 
 
