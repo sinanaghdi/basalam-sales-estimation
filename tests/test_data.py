@@ -130,3 +130,16 @@ def test_products_to_parquet_rebuilds_when_source_changes_without_row_count_chan
     metadata_path = parquet_path.with_suffix(".parquet.meta.json")
     assert metadata_path.exists()
 
+def test_products_to_parquet_uses_canonical_schema_order_not_csv_order(tmp_path):
+    df = _sample_frame(20)
+    csv_path = tmp_path / "reordered.csv"
+    # Real source CSV columns do not necessarily follow the selected dtype map.
+    df = df[list(reversed(df.columns))]
+    df.to_csv(csv_path, index=False)
+    parquet_path = tmp_path / "reordered.parquet"
+
+    data_mod.products_to_parquet(csv_path, parquet_path, chunksize=7)
+
+    converted = pd.read_parquet(parquet_path)
+    assert list(converted.columns) == list(data_mod._product_dtypes())
+
