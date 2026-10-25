@@ -1,5 +1,6 @@
 """Metrics and pipeline invariants on synthetic fixtures (no real data needed)."""
 import numpy as np
+import pandas as pd
 import pytest
 
 from basalam import eval as ev
@@ -227,3 +228,21 @@ def test_hurdle_handles_all_zero_and_all_positive_training_targets():
     assert all_positive["reg"] is not None
     assert np.all(md.hurdle_positive_probability(all_positive["clf"], X) == 1)
     assert np.all(md.hurdle_predict(all_positive, X) >= 0)
+
+def test_cluster_bootstrap_keeps_missing_vendor_separate_from_literal_sentinel():
+    vendors = pd.Series(pd.array(["<missing>", None, "v1", "v2"], dtype="string"))
+    y = np.array([0.0, 1.0, 0.0, 2.0])
+    pred = np.array([0.0, 0.0, 0.0, 0.0])
+    ci = ev.vendor_cluster_bootstrap_ci(y, pred, vendors, n_boot=30, seed=9)
+    assert ci["point"] == pytest.approx(ev.mae(y, pred))
+    assert ci["n_boot"] == 30
+
+
+def test_cluster_bootstrap_rejects_invalid_inputs():
+    with pytest.raises(ValueError, match="equal lengths"):
+        ev.vendor_cluster_bootstrap_ci([0, 1], [0], ["v1", "v2"])
+    with pytest.raises(ValueError, match="positive integer"):
+        ev.vendor_cluster_bootstrap_ci([0], [0], ["v1"], n_boot=0)
+    with pytest.raises(ValueError, match="agg='mean'"):
+        ev.vendor_cluster_bootstrap_ci([0], [0], ["v1"], agg="median")
+
