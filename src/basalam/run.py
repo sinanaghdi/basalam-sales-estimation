@@ -125,7 +125,7 @@ def _evaluate_regime(
         )
         hurdle = md.fit_hurdle(X_train, y_train, params)
         oof["hurdle"][test_idx] = md.hurdle_predict(hurdle, X_test)
-        oof_p[test_idx] = hurdle["clf"].predict_proba(X_test)[:, 1]
+        oof_p[test_idx] = md.hurdle_positive_probability(hurdle["clf"], X_test)
 
         oof["global_median"][test_idx] = md.global_median(y_train)
         lookup = md.category_median_lookup(train, y_train, CAT)
