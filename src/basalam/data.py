@@ -180,6 +180,9 @@ def products_to_parquet(csv_path: str | Path, parquet_path: str | Path, chunksiz
     total_rows = 0
     try:
         for chunk in pd.read_csv(csv_path, usecols=usecols, dtype=dtypes, chunksize=chunksize):
+            # pandas preserves source-file order for usecols; explicitly impose
+            # the canonical dtype/schema order before writing the Parquet file.
+            chunk = chunk[usecols]
             table = pa.Table.from_pandas(chunk, preserve_index=False)
             if writer is None:
                 writer = pq.ParquetWriter(tmp_path, table.schema)
