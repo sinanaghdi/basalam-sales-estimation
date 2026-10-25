@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMClassifier, LGBMRegressor
+from sklearn.dummy import DummyClassifier
 
 DEFAULT_PARAMS = {
     "n_estimators": 50,
@@ -31,21 +32,43 @@ def fit_gbm_poisson(X: pd.DataFrame, y: np.ndarray, params: dict | None = None):
 
 
 def fit_hurdle(X: pd.DataFrame, y: np.ndarray, params: dict | None = None):
-    """Two-part model: P(y > 0) via binary GBM; E[y | y > 0] via Poisson GBM."""
+    """Two-part model: P(y > 0) via binary GBM; E[y | y > 0] via Poisson GBM.
+
+    Degenerate folds with only zero or only positive targets use a constant
+    classifier instead of asking LightGBM to fit a one-class classification
+    problem. The positive-count regressor is fitted only when positive rows
+    exist.
+    """
     p = {**DEFAULT_PARAMS, **(params or {})}
     y = np.asarray(y)
-    clf = LGBMClassifier(objective="binary", **p)
-    clf.fit(X, (y > 0).astype(int))
+    y_binary = (y > 0).astype(int)
+    if np.unique(y_binary).size == 2:
+        clf = LGBMClassifier(objective="binary", **p)
+    else:
+        clf = DummyClassifier(strategy="constant", constant=int(y_binary[0]))
+    clf.fit(X, y_binary)
+
     pos = y > 0
     reg = None
-    if pos.sum() > 0:
+    if pos.any():
         reg = LGBMRegressor(objective="poisson", **p)
-        reg.fit(X.loc[pos.index[pos]] if hasattr(pos, "index") else X[pos], y[pos])
+        X_positive = X.loc[pos] if hasattr(X, "loc") else X[pos]
+        reg.fit(X_positive, y[pos])
     return {"clf": clf, "reg": reg}
 
 
+def hurdle_positive_probability(clf, X: pd.DataFrame) -> np.ndarray:
+    """Return P(y > 0), including classifiers trained on a single class."""
+    classes = np.asarray(getattr(clf, "classes_", []))
+    if not np.any(classes == 1):
+        return np.zeros(len(X), dtype=float)
+    probabilities = clf.predict_proba(X)
+    positive_index = int(np.flatnonzero(classes == 1)[0])
+    return probabilities[:, positive_index]
+
+
 def hurdle_predict(models: dict, X: pd.DataFrame) -> np.ndarray:
-    p = models["clf"].predict_proba(X)[:, 1]
+    p = hurdle_positive_probability(models["clf"], X)
     if models["reg"] is None:
         return np.zeros(len(X))
     mu_pos = models["reg"].predict(X)
