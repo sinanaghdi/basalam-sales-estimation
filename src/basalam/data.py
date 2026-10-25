@@ -136,19 +136,48 @@ def _product_dtypes() -> dict:
 
 
 def products_to_parquet(csv_path: str | Path, parquet_path: str | Path, chunksize: int = 500_000) -> None:
-    """Convert the products CSV to typed Parquet in chunks (done once)."""
+    """Convert the products CSV to typed Parquet in chunks.
+
+    A sidecar records the source hash and output schema. An existing Parquet
+    file is reused only when its sidecar, schema, and row count all validate;
+    stale, truncated, or legacy cache files are rebuilt atomically.
+    """
     import pyarrow as pa
     import pyarrow.parquet as pq
 
+    csv_path = Path(csv_path)
+    parquet_path = Path(parquet_path)
+    parquet_path.parent.mkdir(parents=True, exist_ok=True)
     dtypes = _product_dtypes()
     usecols = list(dtypes)
-    parquet_path = Path(parquet_path)
-    if parquet_path.exists():
-        return
-    # Atomic write: build the file at a temp path, rename only on success, so
-    # a partial conversion is never mistaken for a complete one.
+    source_sha256 = sha256_file(csv_path)
+    source_bytes = csv_path.stat().st_size
+    metadata_path = parquet_path.with_suffix(parquet_path.suffix + ".meta.json")
+
+    if parquet_path.exists() and metadata_path.exists():
+        try:
+            cached = json.loads(metadata_path.read_text(encoding="utf-8"))
+            parquet_file = pq.ParquetFile(parquet_path)
+            valid_cache = (
+                cached.get("source_sha256") == source_sha256
+                and cached.get("source_bytes") == source_bytes
+                and cached.get("columns") == usecols
+                and cached.get("rows") == parquet_file.metadata.num_rows
+                and parquet_file.schema_arrow.names == usecols
+                and parquet_file.metadata.num_rows > 0
+            )
+            if valid_cache:
+                return
+        except Exception:
+            # Corrupt or legacy caches are not trusted; rebuild below.
+            pass
+
+    # Atomic write: build the data and sidecar at temporary paths, then rename
+    # only after the conversion completes successfully.
     tmp_path = parquet_path.with_suffix(parquet_path.suffix + ".part")
+    tmp_metadata_path = metadata_path.with_suffix(metadata_path.suffix + ".part")
     writer = None
+    total_rows = 0
     try:
         for chunk in pd.read_csv(csv_path, usecols=usecols, dtype=dtypes, chunksize=chunksize):
             table = pa.Table.from_pandas(chunk, preserve_index=False)
@@ -157,16 +186,28 @@ def products_to_parquet(csv_path: str | Path, parquet_path: str | Path, chunksiz
             else:
                 table = table.cast(writer.schema)
             writer.write_table(table)
-        if writer is None:
+            total_rows += len(chunk)
+        if writer is None or total_rows == 0:
             raise ValueError(f"no rows read from {csv_path}")
         writer.close()
         writer = None
         tmp_path.replace(parquet_path)
+        metadata = {
+            "source_sha256": source_sha256,
+            "source_bytes": source_bytes,
+            "rows": total_rows,
+            "columns": usecols,
+        }
+        tmp_metadata_path.write_text(
+            json.dumps(metadata, indent=2), encoding="utf-8"
+        )
+        tmp_metadata_path.replace(metadata_path)
     finally:
         if writer is not None:
             writer.close()
-        if tmp_path.exists():
-            tmp_path.unlink()
+        for temporary_path in (tmp_path, tmp_metadata_path):
+            if temporary_path.exists():
+                temporary_path.unlink()
 
 
 def load_products(data_dir: str | Path) -> pd.DataFrame:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -49,12 +50,30 @@ def _config_hash(cfg: dict) -> str:
 
 
 def _git_commit() -> str:
+    """Return the checkout commit, falling back to CI-provided revision metadata.
+
+    A source archive or installed package may not contain the .git directory.
+    In that case GitHub Actions' GITHUB_SHA (or an explicitly supplied
+    GIT_COMMIT) still lets the result identify the exact source revision.
+    """
     try:
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        ).stdout.strip()
-    except Exception:
-        return "unknown (not a git repo)"
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        commit = result.stdout.strip()
+        if commit:
+            return commit
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return (
+        os.environ.get("GITHUB_SHA")
+        or os.environ.get("GIT_COMMIT")
+        or "unknown (no Git checkout or commit environment variable)"
+    )
 
 
 def get_data(cfg: dict) -> pd.DataFrame:
@@ -106,7 +125,7 @@ def _evaluate_regime(
         )
         hurdle = md.fit_hurdle(X_train, y_train, params)
         oof["hurdle"][test_idx] = md.hurdle_predict(hurdle, X_test)
-        oof_p[test_idx] = hurdle["clf"].predict_proba(X_test)[:, 1]
+        oof_p[test_idx] = md.hurdle_positive_probability(hurdle["clf"], X_test)
 
         oof["global_median"][test_idx] = md.global_median(y_train)
         lookup = md.category_median_lookup(train, y_train, CAT)
@@ -219,25 +238,23 @@ def run_experiment(cfg: dict) -> dict:
 
 
 def _data_fingerprint(df: pd.DataFrame) -> str:
-    """Return a stable fingerprint of target and group values.
+    """Fingerprint the full model input, not just target/group columns.
 
-    Hash canonical pandas value hashes rather than raw object-array memory:
-    object-array bytes can encode process-specific pointer values. Row order is
-    intentionally significant because this pins the exact experiment input.
+    Stable pandas value hashes avoid process-specific object-array memory
+    addresses. Column names, dtypes, column order, row count, and row order are
+    included so changing a feature cannot silently reuse the same fingerprint.
     """
-    missing_token = "<missing>"
-    target = pd.Series(
-        pd.to_numeric(df[TARGET], errors="coerce").to_numpy(
-            dtype="float64", na_value=np.nan
-        ),
-        index=df.index,
-    )
-    groups = df[GROUP].astype("string").fillna(missing_token)
-
+    schema = {
+        "columns": [str(column) for column in df.columns],
+        "dtypes": [str(dtype) for dtype in df.dtypes],
+        "n_rows": int(len(df)),
+    }
     h = hashlib.sha256()
-    h.update(pd.util.hash_pandas_object(target, index=False).to_numpy(dtype="<u8").tobytes())
-    h.update(pd.util.hash_pandas_object(groups, index=False).to_numpy(dtype="<u8").tobytes())
-    h.update(str(len(df)).encode("ascii"))
+    h.update(json.dumps(schema, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+    row_hashes = pd.util.hash_pandas_object(
+        df, index=False, categorize=True
+    ).to_numpy(dtype="<u8", copy=False)
+    h.update(row_hashes.tobytes())
     return h.hexdigest()[:16]
 
 

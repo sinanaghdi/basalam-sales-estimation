@@ -108,3 +108,25 @@ def test_manifest_roundtrip(tmp_path):
     m = json.loads(path.read_text())
     assert m["archive_sha256"] == data_mod.ARCHIVE_SHA256
     assert m["audit"]["products_rows"] == data_mod.AUDITED["products_rows"]
+
+def test_products_to_parquet_rebuilds_when_source_changes_without_row_count_change(tmp_path):
+    df = _sample_frame(20)
+    csv_path = tmp_path / "source.csv"
+    df.to_csv(csv_path, index=False)
+    parquet_path = tmp_path / "products.parquet"
+
+    data_mod.products_to_parquet(csv_path, parquet_path, chunksize=7)
+    first = pd.read_parquet(parquet_path)
+    original_price = first.loc[0, "price"]
+
+    # Keep the row count and schema fixed; a source fingerprint must still
+    # invalidate the cache when the underlying values change.
+    df.loc[0, "price"] = float(original_price) + 123.0
+    df.to_csv(csv_path, index=False)
+    data_mod.products_to_parquet(csv_path, parquet_path, chunksize=7)
+
+    rebuilt = pd.read_parquet(parquet_path)
+    assert rebuilt.loc[0, "price"] == pytest.approx(float(original_price) + 123.0)
+    metadata_path = parquet_path.with_suffix(".parquet.meta.json")
+    assert metadata_path.exists()
+

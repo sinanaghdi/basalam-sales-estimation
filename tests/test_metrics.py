@@ -1,5 +1,6 @@
 """Metrics and pipeline invariants on synthetic fixtures (no real data needed)."""
 import numpy as np
+import pandas as pd
 import pytest
 
 from basalam import eval as ev
@@ -182,12 +183,66 @@ def test_data_fingerprint_is_stable_and_sensitive_to_values():
         {
             "sales_count_week": pd.Series([0, 1, None, 3], dtype="Float64"),
             "vendor_id": pd.Series(["v1", "v2", None, "v1"], dtype="string"),
+            "price": pd.Series([10.0, 20.0, None, 40.0], dtype="Float64"),
         }
     )
     same_values = frame.copy()
-    changed_values = frame.copy()
-    changed_values.loc[1, "sales_count_week"] = 2
+    changed_target = frame.copy()
+    changed_target.loc[1, "sales_count_week"] = 2
+    changed_feature = frame.copy()
+    changed_feature.loc[1, "price"] = 21.0
+    changed_group = frame.copy()
+    changed_group.loc[1, "vendor_id"] = "v3"
 
     first = _data_fingerprint(frame)
     assert first == _data_fingerprint(same_values)
-    assert first != _data_fingerprint(changed_values)
+    assert first != _data_fingerprint(changed_target)
+    assert first != _data_fingerprint(changed_feature)
+    assert first != _data_fingerprint(changed_group)
+
+
+def test_git_commit_uses_ci_revision_when_checkout_metadata_is_missing(
+    monkeypatch, tmp_path
+):
+    from basalam.run import _git_commit
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.delenv("GIT_COMMIT", raising=False)
+
+    assert _git_commit() == "a" * 40
+
+
+def test_hurdle_handles_all_zero_and_all_positive_training_targets():
+    import pandas as pd
+
+    X = pd.DataFrame({"feature": [0.0, 1.0, 2.0, 3.0]})
+    params = {"n_estimators": 5, "verbose": -1}
+
+    all_zero = md.fit_hurdle(X, np.zeros(4), params)
+    assert all_zero["reg"] is None
+    assert np.all(md.hurdle_predict(all_zero, X) == 0)
+    assert np.all(md.hurdle_positive_probability(all_zero["clf"], X) == 0)
+
+    all_positive = md.fit_hurdle(X, np.ones(4), params)
+    assert all_positive["reg"] is not None
+    assert np.all(md.hurdle_positive_probability(all_positive["clf"], X) == 1)
+    assert np.all(md.hurdle_predict(all_positive, X) >= 0)
+
+def test_cluster_bootstrap_keeps_missing_vendor_separate_from_literal_sentinel():
+    vendors = pd.Series(pd.array(["<missing>", None, "v1", "v2"], dtype="string"))
+    y = np.array([0.0, 1.0, 0.0, 2.0])
+    pred = np.array([0.0, 0.0, 0.0, 0.0])
+    ci = ev.vendor_cluster_bootstrap_ci(y, pred, vendors, n_boot=30, seed=9)
+    assert ci["point"] == pytest.approx(ev.mae(y, pred))
+    assert ci["n_boot"] == 30
+
+
+def test_cluster_bootstrap_rejects_invalid_inputs():
+    with pytest.raises(ValueError, match="equal lengths"):
+        ev.vendor_cluster_bootstrap_ci([0, 1], [0], ["v1", "v2"])
+    with pytest.raises(ValueError, match="positive integer"):
+        ev.vendor_cluster_bootstrap_ci([0], [0], ["v1"], n_boot=0)
+    with pytest.raises(ValueError, match="agg='mean'"):
+        ev.vendor_cluster_bootstrap_ci([0], [0], ["v1"], agg="median")
+
