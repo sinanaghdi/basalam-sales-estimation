@@ -1,0 +1,23 @@
+name: smoke
+data:
+  source: synthetic
+  synthetic:
+    n_products: 20000
+    n_vendors: 400
+    n_categories: 40
+    seed: 42
+seed: 42
+splits:
+  n_splits: 5
+  regimes: [grouped_vendor, random]
+models:
+  params:
+    n_estimators: 50
+    num_leaves: 15
+    min_child_samples: 20
+    learning_rate: 0.1
+    verbose: -1
+uncertainty:
+  cluster_bootstrap: 50
+output_dir: outputs/experiments
+contamination_demo: true

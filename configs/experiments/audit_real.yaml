@@ -1,0 +1,21 @@
+# Real-data audit experiment. Requires: make prepare-data (downloads the pinned
+# archive, verifies SHA-256, converts to Parquet). The audit runs BEFORE any
+# modeling and fails hard if the pinned expectations are violated.
+name: audit-real
+data:
+  source: real
+  data_dir: data
+seed: 42
+splits:
+  n_splits: 5
+  regimes: [grouped_vendor]
+models:
+  params:
+    n_estimators: 200
+    num_leaves: 63
+    min_child_samples: 100
+    learning_rate: 0.05
+    verbose: -1
+uncertainty:
+  cluster_bootstrap: 200
+output_dir: outputs/experiments
